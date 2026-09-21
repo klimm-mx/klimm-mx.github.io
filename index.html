@@ -154,18 +154,22 @@ header{padding:26px 0 10px}
   }
 
   function pintarEstado(){
+    // Ya activadas en ESTE dispositivo: el botón desaparece (no estorba).
+    // Se sigue auto-suscribiendo en silencio al cargar (ver abajo).
     if (Notification.permission === 'granted') {
-      btn.textContent = '🔔 Enviar notificación de prueba';
-      btn.disabled = false; btn.style.opacity = '1';
-      nota.textContent = 'Notificaciones activas. Toca para una prueba del servidor.';
-    } else if (Notification.permission === 'denied') {
+      caja.style.display = 'none';
+      return;
+    }
+    // Aún no activadas: mostrar el botón para poder activarlas (dispositivo nuevo).
+    caja.style.display = 'block';
+    if (Notification.permission === 'denied') {
       btn.textContent = 'Notificaciones bloqueadas';
       btn.disabled = true; btn.style.opacity = '.6';
       nota.textContent = 'Actívalas en Ajustes del iPhone › Klimm › Notificaciones.';
     } else {
       btn.textContent = 'Activar notificaciones';
       btn.disabled = false; btn.style.opacity = '1';
-      nota.textContent = 'Te avisará cuando entre un lead sin atender.';
+      nota.textContent = 'Actívalas para recibir avisos de leads sin atender.';
     }
   }
 

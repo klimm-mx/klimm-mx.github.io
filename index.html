@@ -155,9 +155,9 @@ header{padding:26px 0 10px}
 
   function pintarEstado(){
     if (Notification.permission === 'granted') {
-      btn.textContent = '🔔 Notificaciones activas';
-      btn.disabled = true; btn.style.opacity = '.6';
-      nota.textContent = 'Listo. Te avisaré aquí de leads sin atender.';
+      btn.textContent = '🔔 Enviar notificación de prueba';
+      btn.disabled = false; btn.style.opacity = '1';
+      nota.textContent = 'Notificaciones activas. Toca para una prueba del servidor.';
     } else if (Notification.permission === 'denied') {
       btn.textContent = 'Notificaciones bloqueadas';
       btn.disabled = true; btn.style.opacity = '.6';
@@ -167,6 +167,19 @@ header{padding:26px 0 10px}
       btn.disabled = false; btn.style.opacity = '1';
       nota.textContent = 'Te avisará cuando entre un lead sin atender.';
     }
+  }
+
+  // Pide al backend UNA notificación de prueba (confirma el camino servidor→iPhone).
+  async function pruebaServidor(){
+    var cfg = backendCfg();
+    if (!cfg.url || !cfg.clave) return false;
+    try {
+      var r = await fetch(cfg.url + '/agente/push/prueba', {
+        method: 'POST', headers: { 'x-backend-key': cfg.clave }
+      });
+      var d = await r.json();
+      return !!(d && d.ok);
+    } catch(_) { return false; }
   }
 
   // Suscribe ESTE dispositivo al push del backend. Devuelve true si quedó suscrito.
@@ -202,12 +215,13 @@ header{padding:26px 0 10px}
     return !!(d2 && d2.ok);
   }
 
-  btn.addEventListener('click', function(){
-    Notification.requestPermission().then(async function(permiso){
+  btn.addEventListener('click', async function(){
+    // 1) Asegurar permiso (si aún no está dado).
+    if (Notification.permission !== 'granted') {
+      var permiso = await Notification.requestPermission();
       pintarEstado();
       if (permiso !== 'granted') return;
-
-      // Prueba LOCAL inmediata: confirma que este iPhone muestra notis.
+      // Prueba LOCAL inmediata la primera vez (confirma que el iPhone muestra notis).
       try {
         var reg = await navigator.serviceWorker.ready;
         reg.showNotification('Klimm · Agente', {
@@ -215,28 +229,32 @@ header{padding:26px 0 10px}
           icon: 'icons/icon-192.png', badge: 'icons/icon-192.png', tag: 'klimm-prueba'
         });
       } catch(_){ /* la prueba local no es crítica */ }
+    }
 
-      // Suscripción REAL al push del backend (los avisos automáticos de leads).
-      try {
-        var ok = await suscribirPush();
-        if (ok) {
-          nota.textContent = '🔔 Listo: te avisaré solo cuando entre un lead.';
-          // Prueba DESDE EL SERVIDOR: confirma el camino completo servidor→iPhone.
-          try {
-            var cfg = backendCfg();
-            await fetch(cfg.url + '/agente/push/prueba', {
-              method: 'POST', headers: { 'x-backend-key': cfg.clave }
-            });
-          } catch(_){ /* la prueba del servidor no es crítica */ }
-        }
-      } catch(e){
-        console.warn('[push] no se pudo suscribir:', e);
-        nota.textContent = 'Notis locales OK, pero no pude suscribir al servidor. Reintenta.';
-      }
-    });
+    // 2) Suscribir (idempotente) + prueba DESDE EL SERVIDOR.
+    try {
+      nota.textContent = 'Conectando…';
+      var ok = await suscribirPush();
+      if (!ok) return; // suscribirPush ya dejó el motivo en la nota
+      nota.textContent = 'Enviando prueba desde el servidor…';
+      var okp = await pruebaServidor();
+      nota.textContent = okp
+        ? '🔔 Listo. Debe llegarte una notificación enviada por el servidor.'
+        : '🔔 Suscrito. La prueba del servidor no llegó — revisa PUSH_ON / VAPID en Render.';
+    } catch(e){
+      console.warn('[push] no se pudo completar:', e);
+      nota.textContent = 'No pude completar. Reintenta en un momento.';
+    }
   });
 
   pintarEstado();
+
+  // Si el permiso YA estaba dado (p. ej. de una prueba anterior), suscribe en
+  // SILENCIO al cargar —idempotente— para que los leads reales lleguen aunque
+  // no vuelvas a tocar el botón.
+  if (Notification.permission === 'granted') {
+    suscribirPush().catch(function(){});
+  }
 })();
 </script>
 </body>

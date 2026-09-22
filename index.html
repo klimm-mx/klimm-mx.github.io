@@ -124,6 +124,24 @@ header{padding:26px 0 10px}
     });
   }
 
+  // 1b) Limpiar el "globo" (badge) del ícono al abrir/volver a la app.
+  //     El contador lo sube el service worker con cada lead; aquí se pone en 0.
+  function limpiarGlobo(){
+    try { if ('clearAppBadge' in navigator) navigator.clearAppBadge(); } catch(_){}
+    try {
+      if (!('indexedDB' in window)) return;
+      var r = indexedDB.open('klimm', 1);
+      r.onupgradeneeded = function(){ try { r.result.createObjectStore('kv'); } catch(_){} };
+      r.onsuccess = function(){
+        try { r.result.transaction('kv','readwrite').objectStore('kv').put(0, 'badge'); } catch(_){}
+      };
+    } catch(_){}
+  }
+  limpiarGlobo();
+  document.addEventListener('visibilitychange', function(){
+    if (document.visibilityState === 'visible') limpiarGlobo();
+  });
+
   // 2) Botón "Activar notificaciones" + suscripción al push del backend
   var caja = document.getElementById('notisCaja');
   var btn  = document.getElementById('btnNotis');

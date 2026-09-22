@@ -12,7 +12,7 @@
  * Para publicar una versión nueva del SW: sube VERSION. Se activa solo al
  * volver a abrir la app (skipWaiting + clients.claim), sin quedar atorado.
  */
-const VERSION = 'v1';
+const VERSION = 'v2';
 const CACHE = 'klimm-' + VERSION;
 const SHELL = [
   '/',
@@ -64,8 +64,35 @@ self.addEventListener('fetch', (event) => {
   event.respondWith(caches.match(req).then((r) => r || fetch(req)));
 });
 
+/* ===== Globo (badge) en el ícono =====
+   Un contador guardado en IndexedDB (compartido con la página). Sube con cada
+   lead y la página lo pone en 0 al abrir la app. Así, si el vendedor no oyó la
+   notificación, el número queda pegado en el ícono hasta que entre a atender. */
+function _idb() {
+  return new Promise((res, rej) => {
+    const r = indexedDB.open('klimm', 1);
+    r.onupgradeneeded = () => r.result.createObjectStore('kv');
+    r.onsuccess = () => res(r.result);
+    r.onerror = () => rej(r.error);
+  });
+}
+function _kvGet(k) {
+  return _idb().then((db) => new Promise((res) => {
+    const t = db.transaction('kv', 'readonly').objectStore('kv').get(k);
+    t.onsuccess = () => res(t.result || 0);
+    t.onerror = () => res(0);
+  }));
+}
+function _kvSet(k, v) {
+  return _idb().then((db) => new Promise((res) => {
+    const t = db.transaction('kv', 'readwrite').objectStore('kv').put(v, k);
+    t.onsuccess = () => res();
+    t.onerror = () => res();
+  }));
+}
+
 /* ===== Notificaciones ===== */
-// Se dispara cuando el backend envía un push (Paso 1B — VAPID). Ya queda listo.
+// Se dispara cuando el backend envía un push (Paso 1B — VAPID).
 self.addEventListener('push', (event) => {
   let data = {};
   try { data = event.data ? event.data.json() : {}; }
@@ -80,7 +107,19 @@ self.addEventListener('push', (event) => {
     renotify: true,
     data: { url: data.url || '/solon/panel_f1.html' } // al tocar, abre el Agente
   };
-  event.waitUntil(self.registration.showNotification(title, options));
+
+  event.waitUntil((async () => {
+    // 1) Mostrar la notificación (sonido + pantalla bloqueada + centro de notis).
+    await self.registration.showNotification(title, options);
+    // 2) Subir el globo del ícono (persiste aunque no oiga la notificación).
+    try {
+      const n = (await _kvGet('badge')) + 1;
+      await _kvSet('badge', n);
+      if (self.navigator && self.navigator.setAppBadge) {
+        await self.navigator.setAppBadge(n);
+      }
+    } catch (_) { /* si el badge no está soportado, la notificación igual salió */ }
+  })());
 });
 
 self.addEventListener('notificationclick', (event) => {

@@ -12,23 +12,25 @@
  * Para publicar una versión nueva del SW: sube VERSION. Se activa solo al
  * volver a abrir la app (skipWaiting + clients.claim), sin quedar atorado.
  */
-const VERSION = 'v2';
+const VERSION = 'v3';
 const CACHE = 'klimm-' + VERSION;
 const SHELL = [
   '/',
   '/index.html',
   '/manifest.webmanifest',
   '/icons/icon-192.png',
-  '/icons/icon-512.png'
+  '/icons/icon-512.png',
+  '/solon/panel_f1.html'   // el Agente: pre-guardado para que abra YA en celular
 ];
 
 self.addEventListener('install', (event) => {
-  event.waitUntil(
-    caches.open(CACHE)
-      .then((c) => c.addAll(SHELL))
-      .then(() => self.skipWaiting())
-      .catch(() => self.skipWaiting())
-  );
+  // Guardar cada archivo por separado (allSettled): si uno falla, el resto igual
+  // queda en caché (addAll es atómico y abortaría todo por un solo fallo).
+  event.waitUntil((async () => {
+    const cache = await caches.open(CACHE);
+    await Promise.allSettled(SHELL.map((u) => cache.add(u)));
+    await self.skipWaiting();
+  })());
 });
 
 self.addEventListener('activate', (event) => {
@@ -46,17 +48,26 @@ self.addEventListener('fetch', (event) => {
   try { url = new URL(req.url); } catch (_) { return; }
   if (url.origin !== self.location.origin) return; // backend/otros orígenes: directo
 
-  // Navegación (abrir la app o cualquier herramienta): RED PRIMERO.
+  // Navegación (abrir la app o cualquier herramienta): CACHÉ PRIMERO + refresco
+  // en segundo plano (stale-while-revalidate). Abre AL INSTANTE aunque el celular
+  // esté lento o sin señal; se actualiza sola por detrás para la próxima vez.
+  // No muestra datos viejos: el HTML es el cascarón; los leads los pide el panel
+  // en vivo con su propia llamada al backend.
   if (req.mode === 'navigate') {
-    event.respondWith(
-      fetch(req)
-        .then((res) => {
-          const copy = res.clone();
-          caches.open(CACHE).then((c) => c.put(req, copy)).catch(() => {});
-          return res;
-        })
-        .catch(() => caches.match(req).then((r) => r || caches.match('/index.html')))
-    );
+    event.respondWith((async () => {
+      const cache = await caches.open(CACHE);
+      const cached = await cache.match(req);
+      // Revalidación en segundo plano (no se espera si ya hay caché).
+      const red = fetch(req)
+        .then((res) => { if (res && res.ok) cache.put(req, res.clone()); return res; })
+        .catch(() => null);
+      // Caché primero (instantáneo). Si no hay caché, esperar la red. Si tampoco,
+      // caer al hub para no dejar pantalla en blanco.
+      return cached
+          || (await red)
+          || (await cache.match('/index.html'))
+          || (await cache.match('/'));
+    })());
     return;
   }
 
